@@ -1,9 +1,12 @@
 package com.sdi.main;
 
+import androidx.lifecycle.LiveData;
+
 import com.sdi.api.EarthquakeJSONResponse;
 import com.sdi.api.Feature;
 import com.sdi.api.ApiClient;
 import com.sdi.Earthquake;
+import com.sdi.database.EqDatabase;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +16,15 @@ import retrofit2.Callback;
 import retrofit2.Response;
 
 public class MainRepository {
+
+    private final EqDatabase database;
+    public MainRepository(EqDatabase database) {
+        this.database = database;
+    }
+
+    public LiveData<List<Earthquake>> getEqList() {
+        return database.eqDAO().getEarthquakes();
+    }
 
     public interface DownloadEqsListener{
         void onEqsDownloaded(List<Earthquake> eqList);
@@ -38,17 +50,26 @@ public class MainRepository {
         return eqList;
     }
 
-    public void getEarthquakes(DownloadEqsListener downloadEqsListener){
+    public void downloadAndSaveEarthquakes(DownloadStatusListener downloadStatusListener){
         ApiClient.EqService service = ApiClient.getInstance().getService();
         service.getEarthquakes().enqueue(new Callback<EarthquakeJSONResponse>() {
             @Override
             public void onResponse(Call<EarthquakeJSONResponse > call, Response<EarthquakeJSONResponse > response) {
                 List<Earthquake> earthquakeList = getEarthquakesWithMoshi(response.body());
-                downloadEqsListener.onEqsDownloaded(earthquakeList);
+                EqDatabase.databaseWriteExecutor.execute(() -> {
+                    database.eqDAO().insertAll(earthquakeList);
+                });
+                downloadStatusListener.downloadSuccess();
             }
             @Override
-            public void onFailure(Call<EarthquakeJSONResponse> call, Throwable t) { }
+            public void onFailure(Call<EarthquakeJSONResponse> call, Throwable t) {
+                downloadStatusListener.downloadError(t.getMessage());
+            }
         });
     }
 
+    public interface DownloadStatusListener{
+        void downloadSuccess();
+        void downloadError(String message);
+    }
 }
